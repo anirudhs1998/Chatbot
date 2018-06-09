@@ -1,3 +1,8 @@
+# Building a ChatBot with Deep NLP
+ 
+ 
+ 
+# Importing the libraries
 import numpy as np
 import tensorflow as tf
 import re
@@ -16,13 +21,13 @@ conversations = open('movie_conversations.txt', encoding = 'utf-8', errors = 'ig
 # Creating a dictionary that maps each line and its id
 id2line = {}
 for line in lines:
-    _line = line.split(' +++$+++ ') #_ denotes a local variable
+    _line = line.split(' +++$+++ ')
     if len(_line) == 5:
         id2line[_line[0]] = _line[4]
  
 # Creating a list of all of the conversations
 conversations_ids = []
-for conversation in conversations[:-1]:  #Since last row of conversations is an empty row
+for conversation in conversations[:-1]:
     _conversation = conversation.split(' +++$+++ ')[-1][1:-1].replace("'", "").replace(" ", "")
     conversations_ids.append(_conversation.split(','))
  
@@ -43,13 +48,15 @@ def clean_text(text):
     text = re.sub(r"that's", "that is", text)
     text = re.sub(r"what's", "what is", text)
     text = re.sub(r"where's", "where is", text)
+    text = re.sub(r"how's", "how is", text)
     text = re.sub(r"\'ll", " will", text)
     text = re.sub(r"\'ve", " have", text)
     text = re.sub(r"\'re", " are", text)
     text = re.sub(r"\'d", " would", text)
+    text = re.sub(r"n't", " not", text)
     text = re.sub(r"won't", "will not", text)
     text = re.sub(r"can't", "cannot", text)
-    text = re.sub(r"[-()\"#/@;:<>{}+=~|.?,]", "", text)
+    text = re.sub(r"[-()\"#/@;:<>{}`+=~|.!?,]", "", text)
     return text
  
 # Cleaning the questions
@@ -61,6 +68,24 @@ for question in questions:
 clean_answers = []
 for answer in answers:
     clean_answers.append(clean_text(answer))
+ 
+# Filtering out the questions and answers that are too short or too long
+short_questions = []
+short_answers = []
+i = 0
+for question in clean_questions:
+    if 2 <= len(question.split()) <= 25:
+        short_questions.append(question)
+        short_answers.append(clean_answers[i])
+    i += 1
+clean_questions = []
+clean_answers = []
+i = 0
+for answer in short_answers:
+    if 2 <= len(answer.split()) <= 25:
+        clean_answers.append(answer)
+        clean_questions.append(short_questions[i])
+    i += 1
  
 # Creating a dictionary that maps each word to its number of occurrences
 word2count = {}
@@ -78,15 +103,14 @@ for answer in clean_answers:
             word2count[word] += 1
  
 # Creating two dictionaries that map the questions words and the answers words to a unique integer
-#Removing 5% least frequent words
-threshold_questions = 20
+threshold_questions = 15
 questionswords2int = {}
 word_number = 0
 for word, count in word2count.items():
     if count >= threshold_questions:
         questionswords2int[word] = word_number
         word_number += 1
-threshold_answers = 20
+threshold_answers = 15
 answerswords2int = {}
 word_number = 0
 for word, count in word2count.items():
@@ -130,7 +154,6 @@ for answer in clean_answers:
     answers_into_int.append(ints)
  
 # Sorting questions and answers by the length of questions
-# We do this because this will speed up the training and reduce the loss. This is cuz it reduces the padding
 sorted_clean_questions = []
 sorted_clean_answers = []
 for length in range(1, 25 + 1):
@@ -144,11 +167,8 @@ for length in range(1, 25 + 1):
 ########## PART 2 - BUILDING THE SEQ2SEQ MODEL ##########
  
  
- # Creating placeholders for the inputs and the targets
-# In tensorflow , all variables are used in tensors.
-# Tensors are advanced numpy array where all elements are of same type.
-# All variables in a tensor must be defined in a tensorflow placeholder
-
+ 
+# Creating placeholders for the inputs and the targets
 def model_inputs():
     inputs = tf.placeholder(tf.int32, [None, None], name = 'input')
     targets = tf.placeholder(tf.int32, [None, None], name = 'target')
@@ -156,9 +176,7 @@ def model_inputs():
     keep_prob = tf.placeholder(tf.float32, name = 'keep_prob')
     return inputs, targets, lr, keep_prob
  
-# PreProcessing the targets
-# RNN accepts the target answers only as batches. We need to choose appropriate batch size
-# Each answer should start with a <SOS>
+# Preprocessing the targets
 def preprocess_targets(targets, word2int, batch_size):
     left_side = tf.fill([batch_size, 1], word2int['<SOS>'])
     right_side = tf.strided_slice(targets, [0,0], [batch_size, -1], [1,1])
@@ -175,8 +193,6 @@ def encoder_rnn(rnn_inputs, rnn_size, num_layers, keep_prob, sequence_length):
                                                                     sequence_length = sequence_length,
                                                                     inputs = rnn_inputs,
                                                                     dtype = tf.float32)
-     #Bidirectional Dynamic RNN returns 2 outputs. The tuple containing forward and backward RNN's and a tuple containing forward and backward states
-    #We need only the 2nd element which is extracted by '_,'
     return encoder_state
  
 # Decoding the training set
@@ -194,7 +210,7 @@ def decode_training_set(encoder_state, decoder_cell, decoder_embedded_input, seq
                                                                                                               decoder_embedded_input,
                                                                                                               sequence_length,
                                                                                                               scope = decoding_scope)
-    decoder_output_dropout = tf.nn.dropout(decoder_output, keep_prob) #used to prevent overfitting and improve accuracy
+    decoder_output_dropout = tf.nn.dropout(decoder_output, keep_prob)
     return output_function(decoder_output_dropout)
  
 # Decoding the test/validation set
@@ -232,7 +248,6 @@ def decoder_rnn(decoder_embedded_input, decoder_embeddings_matrix, encoder_state
                                                                       scope = decoding_scope,
                                                                       weights_initializer = weights,
                                                                       biases_initializer = biases)
-         #Creates output function for fully connected layer after RNN
         training_predictions = decode_training_set(encoder_state,
                                                    decoder_cell,
                                                    decoder_embedded_input,
@@ -284,16 +299,16 @@ def seq2seq_model(inputs, targets, keep_prob, batch_size, sequence_length, answe
  
  
 # Setting the Hyperparameters
-epochs =  50 #100 for better 
-batch_size = 128 #64
-rnn_size = 512
+epochs = 50     #100
+batch_size = 32
+rnn_size = 1024
 num_layers = 3
-encoding_embedding_size = 512
-decoding_embedding_size = 512
-learning_rate = 0.01
+encoding_embedding_size = 1024
+decoding_embedding_size = 1024
+learning_rate = 0.001
 learning_rate_decay = 0.9
 min_learning_rate = 0.0001
-keep_probability = 0.5  #Probability of dropout of a neuron
+keep_probability = 0.5
  
 # Defining a session
 tf.reset_default_graph()
@@ -329,20 +344,17 @@ with tf.name_scope("optimization"):
                                                   tf.ones([input_shape[0], sequence_length]))
     optimizer = tf.train.AdamOptimizer(learning_rate)
     gradients = optimizer.compute_gradients(loss_error)
-      #Lets cap these gradients
     clipped_gradients = [(tf.clip_by_value(grad_tensor, -5., 5.), grad_variable) for grad_tensor, grad_variable in gradients if grad_tensor is not None]
     optimizer_gradient_clipping = optimizer.apply_gradients(clipped_gradients)
  
-#Padding the sequences with the <PAD> token
-# Question : [ 'Who', 'are', 'you' ]
-# Answer : [ <SOS>, 'I', 'am', 'a', 'bot', '.', <EOS>]
+# Padding the sequences with the <PAD> token
 def apply_padding(batch_of_sequences, word2int):
     max_sequence_length = max([len(sequence) for sequence in batch_of_sequences])
     return [sequence + [word2int['<PAD>']] * (max_sequence_length - len(sequence)) for sequence in batch_of_sequences]
  
 # Splitting the data into batches of questions and answers
 def split_into_batches(questions, answers, batch_size):
-    for batch_index in range(0, len(questions) // batch_size):  # // denotes an integer result after division
+    for batch_index in range(0, len(questions) // batch_size):
         start_index = batch_index * batch_size
         questions_in_batch = questions[start_index : start_index + batch_size]
         answers_in_batch = answers[start_index : start_index + batch_size]
@@ -358,15 +370,14 @@ validation_questions = sorted_clean_questions[:training_validation_split]
 validation_answers = sorted_clean_answers[:training_validation_split]
  
 # Training
-batch_index_check_training_loss = 100 #Check training loss every 100 batches
-batch_index_check_validation_loss = ((len(training_questions)) // batch_size // 2) - 1 #Check loss in the middle of the epoch
-total_training_loss_error = 0 #used to c0mpute the sum of  training losses on 100 batches
-list_validation_loss_error = [] #all the losses are put in this list to perform early stopping(when validation loss after an epoch is lower then all other losses and below a threshold, we stop validation)
-early_stopping_check = 0 # each time there is no improvement of validation loss, it is incremented
-early_stopping_stop = 1000 #Increment till 1000. Better choose 100
-checkpoint = "chatbot_weights.ckpt" #Save the weights which we can load when we want to talk to our trained chatbot
-session.run(tf.global_variables_initializer()) #initalize all global variables in the session
-
+batch_index_check_training_loss = 100
+batch_index_check_validation_loss = ((len(training_questions)) // batch_size // 2) - 1
+total_training_loss_error = 0
+list_validation_loss_error = []
+early_stopping_check = 0
+early_stopping_stop = 100
+checkpoint = "chatbot_weights.ckpt"
+session.run(tf.global_variables_initializer())
 for epoch in range(1, epochs + 1):
     for batch_index, (padded_questions_in_batch, padded_answers_in_batch) in enumerate(split_into_batches(training_questions, training_answers, batch_size)):
         starting_time = time.time()
@@ -386,26 +397,23 @@ for epoch in range(1, epochs + 1):
                                                                                                                                        total_training_loss_error / batch_index_check_training_loss,
                                                                                                                                        int(batch_time * batch_index_check_training_loss)))
             total_training_loss_error = 0
-        if batch_index % batch_index_check_validation_loss == 0 and batch_index > 0: #We dont want to include the 1st batch
+        if batch_index % batch_index_check_validation_loss == 0 and batch_index > 0:
             total_validation_loss_error = 0
             starting_time = time.time()
             for batch_index_validation, (padded_questions_in_batch, padded_answers_in_batch) in enumerate(split_into_batches(validation_questions, validation_answers, batch_size)):
-                batch_validation_loss_error = session.run(loss_error, {inputs: padded_questions_in_batch,  #optimizer is used only in training. SO no need for that in validation. So function returns obly 1 argument. _, can be removed
+                batch_validation_loss_error = session.run(loss_error, {inputs: padded_questions_in_batch,
                                                                        targets: padded_answers_in_batch,
                                                                        lr: learning_rate,
                                                                        sequence_length: padded_answers_in_batch.shape[1],
-                                                                       keep_prob: 1}) #Probbaliity  is always 1 in validation as all neurons have to be present
+                                                                       keep_prob: 1})
                 total_validation_loss_error += batch_validation_loss_error
             ending_time = time.time()
             batch_time = ending_time - starting_time
-            average_validation_loss_error = total_validation_loss_error / (len(validation_questions) / batch_size)  #len(validation_questions)/batch_size gives no. of batches
+            average_validation_loss_error = total_validation_loss_error / (len(validation_questions) / batch_size)
             print('Validation Loss Error: {:>6.3f}, Batch Validation Time: {:d} seconds'.format(average_validation_loss_error, int(batch_time)))
-            #https://pyformat.info/
-             #Apply decay to learning rate
             learning_rate *= learning_rate_decay
             if learning_rate < min_learning_rate:
                 learning_rate = min_learning_rate
-             #Taking care of early stopping
             list_validation_loss_error.append(average_validation_loss_error)
             if average_validation_loss_error <= min(list_validation_loss_error):
                 print('I speak better now!!')
@@ -421,49 +429,39 @@ for epoch in range(1, epochs + 1):
         print("My apologies, I cannot speak better anymore. This is the best I can do.")
         break
 print("Game Over")
-
-'''
-The Saver class adds ops to save and restore variables to and from checkpoints. 
-It also provides convenience methods to run these ops.
-Checkpoints are binary files in a proprietary format which map variable names to tensor values. 
-The best way to examine the contents of a checkpoint is to load it using a Saver.
-Savers can automatically number checkpoint filenames with a provided counter. 
-This lets you keep multiple checkpoints at different steps while training a model.
-For example you can number the checkpoint filenames with the training step number. 
-To avoid filling up disks, savers manage checkpoint files automatically.
- For example, they can keep only the N most recent files, or one checkpoint for every N hours of training.
-'''
-################# PART -4 - TESTING THE SEQ2SEQ MODEL #####################33
-
-#Loading the weights and running the session
+ 
+ 
+ 
+########## PART 4 - TESTING THE SEQ2SEQ MODEL ##########
+ 
+ 
+ 
+# Loading the weights and Running the session
 checkpoint = "./chatbot_weights.ckpt"
 session = tf.InteractiveSession()
 session.run(tf.global_variables_initializer())
-#We connect the loaded weights to the session using the saver object
 saver = tf.train.Saver()
-saver.restore(session,checkpoint)
-
-#Converting the questions from strings to list of encoding integers
-def convert_string2int(question,word2int):
+saver.restore(session, checkpoint)
+ 
+# Converting the questions from strings to lists of encoding integers
+def convert_string2int(question, word2int):
     question = clean_text(question)
-    return [word2int.get(word,word2int['<OUT>']) for word in question.split()] #If thw word in the question is one of the neglected word during training, we have to replace it by the corresponding int value of '<OUT>'
-
-#Setting up the chat
+    return [word2int.get(word, word2int['<OUT>']) for word in question.split()]
+ 
+# Setting up the chat
 while(True):
     question = input("You: ")
     if question == 'Goodbye':
         break
-    question = convert_string2int(question,questionswords2int)
-    #Questions used in training had length of 20. SO we do padding
-    question = question + [questionswords2int['<PAD>']] * (20 - len(question))
-    #Questions should be in a batch
-    fake_batch = np.zeros((batch_size,20))
+    question = convert_string2int(question, questionswords2int)
+    question = question + [questionswords2int['<PAD>']] * (25 - len(question))
+    fake_batch = np.zeros((batch_size, 25))
     fake_batch[0] = question
-    predicted_answer = session.run(test_predictions, {inputs: fake_batch , keep_prob: 0.5})[0] #Predicted answers is the 1st element in the list of ouputs
+    predicted_answer = session.run(test_predictions, {inputs: fake_batch, keep_prob: 0.5})[0]
     answer = ''
-    for i in np.argmax(predicted_answer, axis = 1): # i will take then value of different token ids in the predicted answers
+    for i in np.argmax(predicted_answer, 1):
         if answersints2word[i] == 'i':
-            token = 'I'
+            token = ' I'
         elif answersints2word[i] == '<EOS>':
             token = '.'
         elif answersints2word[i] == '<OUT>':
@@ -473,44 +471,4 @@ while(True):
         answer += token
         if token == '.':
             break
-    print('Chatbot: ' + answer)
-        
-        
-        
-    
-    
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    print('ChatBot: ' + answer)
